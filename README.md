@@ -1,142 +1,139 @@
-# Entorno Docker del curso — PostgreSQL + pgAdmin + Node.js
+# Sistema de Gestión Bibliotecaria
+**Proyecto Final · Base de Datos Relacional**  
+**Curso:** Bases de Datos (Cuarto Semestre)  
+**Integrantes:**
+- Andres Felipe Rengifo Rodriguez - 202519613
+- Jose Manuel Cardona Gil - 202521653
+- Juan Camilo Morales - 202515391
+- Jorge Luis Castro - 202517065
 
-Un único `docker-compose.yml` para **todas las prácticas del semestre y el
-proyecto final**. No se clona ni se copia por práctica: se levanta una vez y
-se reutiliza, cambiando solo el contenido de tres carpetas. Pensado para que
-enseñar/aprender sea fácil, no para producción (credenciales de ejemplo,
-todo en `localhost`, sin TLS).
 
-## Qué trae
+---
 
-| Servicio | Imagen | Para qué | Puerto en tu máquina |
+## 1. Descripción del Entorno
+
+El proyecto se ejecuta en contenedores mediante **Docker Compose**, integrando el motor relacional, la administración visual y el entorno de aplicación:
+
+| Servicio | Imagen | Función en el Proyecto | Puerto Local |
 |---|---|---|---|
-| `postgres` | `postgres:16` | El motor relacional del curso | `localhost:5432` |
-| `pgadmin` | `dpage/pgadmin4` | Administración gráfica de Postgres | `localhost:5050` |
-| `node` | `node:20-alpine` | Corre el proyecto Node.js de la práctica/proyecto | `localhost:3000` |
+| `postgres` | `postgres:16` | Motor de base de datos relacional (esquema `biblioteca`) | `localhost:5432` |
+| `pgadmin` | `dpage/pgadmin4:8` | Interfaz web gráfica de administración | `localhost:5050` |
+| `node` | `node:20-alpine` | Entorno para la API / Backend del proyecto | `localhost:3000` |
 
-## Estructura (lo único que necesitas tocar)
+---
 
-```
-entorno-docker/
-├── docker-compose.yml
-├── .env.example              # copiar a .env si quieres cambiar credenciales/puertos
+## 2. Estructura del Repositorio
+
+```text
+taller-bd/
+├── docker-compose.yml              # Definición de servicios (Postgres, pgAdmin, Node)
+├── .env.example                    # Plantilla de variables de entorno
+├── README.md                       # Documentación principal y bitácora de entregas
+├── docs/
+│   └── mapeo-y-criterios.md        # Mapeo CSV -> esquema y criterios de error
+├── assets/                         # Capturas de comprobación de las ejecuciones
 ├── postgres/
-│   ├── init/                 # scripts que corren UNA vez (base vacía) — esquema + datos semilla
-│   ├── scripts/               # scripts sueltos para correr a mano cuando quieras
-│   └── data/                  # ahí vive la base de datos en tu disco (no tocar a mano)
+│   ├── init/
+│   │   └── 01_esquema.sql          # Esquema de arranque automático (7 tablas)
+│   ├── scripts/
+│   │   ├── S14-carga-libros.sql    # Script de carga masiva de libros
+│   │   ├── S14-carga-lectores.sql  # Script de carga masiva de lectores
+│   │   ├── correr-pruebas.sh       # Script de ejecución automatizada
+│   │   └── datos/                  # Archivos CSV (semilla y propios)
+│   └── data/                       # Datos persistentes de Postgres (ignorado en git)
 ├── pgadmin/
-│   └── servers.json           # conexión a "postgres" precargada en pgAdmin
-│                               # (la config/sesión de pgAdmin vive en un volumen
-│                               #  Docker nombrado, no en una carpeta visible)
+│   └── servers.json                # Conexión precargada a Postgres
 └── node/
     ├── docker-entrypoint.sh
-    └── proyecto/               # AQUÍ va el código de tu práctica o proyecto final
+    └── proyecto/                   # Código de la aplicación
 ```
 
-Cada subcarpeta tiene su propio `README.md` con el detalle.
+---
 
-## Requisitos
+## 3. Puesta en Marcha (Comandos Rápidos)
 
-- Docker Desktop (Windows/Mac) o Docker Engine + Docker Compose Plugin (Linux).
-- Verifica con: `docker compose version`.
-
-## Primer arranque
+Requisitos: **Docker Desktop** encendido.
 
 ```bash
-cd entorno-docker
-docker compose up -d
+# 1. Levantar la base de datos en segundo plano
+docker compose up -d postgres
+
+# 2. Conectarse a la consola psql
+docker compose exec postgres psql -U curso -d curso
+
+# 3. Levantar también la interfaz visual pgAdmin (opcional)
+docker compose up -d pgadmin
+# (Acceder en el navegador a http://localhost:5050 - credenciales: estudiante@curso.edu.co / curso)
+
+# 4. Apagar los contenedores (los datos se conservan)
+docker compose down
 ```
 
-Eso levanta los tres servicios. La primera vez, Postgres ejecuta los
-scripts de `postgres/init/` (si hay alguno) para crear el esquema inicial.
-
-- **PostgreSQL:** `localhost:5432`, usuario/clave `curso`, base `curso`.
-- **pgAdmin:** abre `http://localhost:5050` — el servidor "Curso -
-  PostgreSQL" ya está precargado, solo pide la contraseña de Postgres
-  (`curso`) la primera vez y luego la recuerda.
-- **Node:** si `node/proyecto/` tiene un `package.json`, tu app queda
-  disponible en `http://localhost:3000` (o el puerto que uses).
-
-Solo necesitas Postgres y pgAdmin encendidos (por ejemplo, en las semanas de
-SQL puro, sin API)? Levanta solo esos dos:
-
-```bash
-docker compose up -d postgres pgadmin
-```
-
-## Flujo de trabajo típico por práctica
-
-**Prácticas de SQL/modelado (solo Postgres + pgAdmin):**
-
-1. Reemplaza los archivos de `postgres/init/` por el `.sql` de la práctica
-   (esquema + datos semilla).
-2. Si ya habías usado el entorno antes, borra los datos para que el init
-   vuelva a correr: `docker compose down && rm -rf postgres/data/*`.
-3. `docker compose up -d postgres pgadmin` y trabaja desde pgAdmin, o por
-   línea de comandos: `docker compose exec postgres psql -U curso -d curso`.
-
-**Prácticas de API REST / proyecto final (Postgres + Node):**
-
-1. Coloca el proyecto Node.js en `node/proyecto/` (ver su README).
-2. `docker compose up -d`.
-3. Edita el código con tu editor normal en tu máquina — el contenedor ve los
-   cambios al instante; si usas `nodemon` en el script `dev`, la app se
-   reinicia sola.
-
-## Comandos que vas a usar seguido
-
-```bash
-docker compose up -d              # levantar todo en segundo plano
-docker compose ps                 # ver qué está corriendo
-docker compose logs -f node       # ver logs en vivo de un servicio (postgres | pgadmin | node)
-docker compose exec node sh       # abrir una terminal dentro del contenedor de Node
-docker compose exec postgres psql -U curso -d curso   # abrir psql
-docker compose restart node       # reiniciar Node (p. ej. después de crear package.json)
-docker compose down               # apagar todo (los datos NO se borran)
-```
-
-## Cómo empezar de cero (borrar todo y volver a construir)
-
+### Reiniciar la base de datos desde cero
+Si se modifica `01_esquema.sql` y se requiere regenerar la base limpia:
 ```bash
 docker compose down
+# En Windows (PowerShell):
+Remove-Item -Recurse -Force postgres/data/*
+# En Linux / Mac:
 rm -rf postgres/data/*
-docker compose up -d
+
+docker compose up -d postgres
 ```
 
-Eso reinicia Postgres desde cero. La configuración de pgAdmin (conexiones
-guardadas) vive aparte, en un volumen de Docker — si también quieres
-reiniciarla: `docker compose down -v` (esto sí borra ese volumen, además de
-parar los contenedores; los datos de Postgres en `postgres/data/` no se
-tocan porque son una carpeta del host, no un volumen).
+---
 
-En Linux, si `rm -rf postgres/data/*` da "Permission denied": Postgres deja
-su carpeta de datos con permisos restringidos (dueño el usuario interno del
-contenedor), es normal. Bórrala desde dentro de Docker en vez de a mano:
+## 4. Bitácora de Entrega · Hito 2 (Sesión 14)
 
-```bash
-docker compose run --rm postgres sh -c "rm -rf /var/lib/postgresql/data/*"
+### A. Ubicación de Archivos de la Entrega
+
+- **Esquema de arranque (7 tablas):** [`postgres/init/01_esquema.sql`](postgres/init/01_esquema.sql)
+- **Scripts de carga:** [`postgres/scripts/S14-carga-libros.sql`](postgres/scripts/S14-carga-libros.sql) y [`postgres/scripts/S14-carga-lectores.sql`](postgres/scripts/S14-carga-lectores.sql)
+- **CSV propio:** [`postgres/scripts/datos/libros_propio.csv`](postgres/scripts/datos/libros_propio.csv)
+- **Mapeo y criterios de error:** Se encuentran en la carpeta `docs/` en el archivo [`docs/mapeo-y-criterios.md`](docs/mapeo-y-criterios.md)
+- **Capturas de comprobación:** Todas las imágenes se encuentran almacenadas en la carpeta `assets/`
+
+---
+
+### B. Cargas Ejecutadas y Comprobaciones
+
+
+| Carga / Acción Realizada | Qué ocurrió en la ejecución | Imagen de Comprobación (en `assets/`) |
+|---|---|---|
+| **Creación del esquema** | Se crearon con éxito las 7 tablas del esquema `biblioteca`. | `Creacion_Tablas_Esquema_Biblioteca.png` |
+| **Carga de libros limpio** | Se cargaron **32 libros** exitosamente con 0 rechazados usando `S14-carga-libros.sql`. | `Carga_Libros_Limpios.png` |
+| **Carga de libros con errores** | Se rechazaron las **8 filas malas** por datos inválidos y entraron 0 a la tabla. | `Carga_Libros_Errores.png` |
+| **Carga de lectores limpio** | Se cargaron **20 lectores** como usuarios exitosamente con 0 rechazados usando `S14-carga-lectores.sql`. | `Carga_Lectores_Limpios.png` |
+| **Carga de lectores con errores** | Se rechazaron las **6 filas malas** (correo inválido, datos vacíos) y entraron 0 a la tabla. | `Carga_lectores_Errores.png` |
+| **Carga de CSV propio** | Se cargaron **6 libros nuevos válidos** y se rechazaron **3 filas** con errores creados por el grupo. | `Carga_CSV_propio.png` |
+
+---
+
+### C. Prueba de la Última Línea de Defensa (Paso 5)
+
+Se anuló deliberadamente la regla de validación de título vacío para forzar que el dato erróneo intentara insertarse en la tabla final:
+
+- **Resultado:** La fila fue rechazada por la restricción `CHECK (titulo <> '')` de la tabla, provocando un **`ROLLBACK` automático** de toda la transacción. Ni los datos válidos ni los registros de rechazo se guardaron.
+- **Comprobación:** La evidencia se encuentra en la imagen `Prueba_Ultima_Linea_De_Defensa.png` dentro de la carpeta `assets/`.
+
+---
+
+### D. Conteos Finales en Base de Datos
+
+Verificación final consolidada mediante `psql`:
+
+```sql
+SELECT (SELECT count(*) FROM biblioteca.libro) AS libros,
+       (SELECT count(*) FROM biblioteca.ejemplar) AS ejemplares,
+       (SELECT count(*) FROM biblioteca.usuario) AS usuarios,
+       (SELECT count(*) FROM biblioteca.rechazo_carga) AS rechazos;
 ```
 
-## Preguntas frecuentes
+- **38 Libros** (32 de semilla + 6 propios)
+- **111 Ejemplares** (generados por cada copia de libro)
+- **20 Usuarios (Lectores)**
+- **49 Rechazos registrados** en `rechazo_carga`
 
-**¿Pierdo mis datos si apago el computador?**
-No. `postgres/data/` es una carpeta normal en tu disco (bind mount), no algo
-interno de Docker — sobrevive a `docker compose down`, reinicios y
-apagones. Solo se pierde si la borras a propósito (ver arriba). La
-configuración de pgAdmin vive en un volumen de Docker aparte y también
-persiste igual, salvo que corras `docker compose down -v`.
-
-**¿Puedo usar el mismo entorno para el proyecto final?**
-Sí, es justo la idea: mismas tres carpetas, mismo `docker-compose.yml`.
-Cambia el contenido de `postgres/init/` y `node/proyecto/` por los del
-proyecto y sigue igual.
-
-**¿Cómo cambio el puerto porque ya tengo algo corriendo en 5432/5050/3000?**
-Copia `.env.example` a `.env` y cambia `POSTGRES_PORT`, `PGADMIN_PORT` o
-`NODE_PORT`. No hace falta tocar `docker-compose.yml`.
-
-**¿Cómo conecto mi código Node a Postgres?**
-Desde dentro del contenedor, el host de la base es `postgres` (nombre del
-servicio), no `localhost`. Con la librería `pg`, `new Pool()` sin
-argumentos ya funciona: toma host/usuario/clave/base de las variables de
-entorno que el `docker-compose.yml` le pasa al contenedor `node`.
+**Comprobaciones en la carpeta `assets/`:**
+- El conteo consolidado se encuentra en la imagen `Conteo_FInal.png`.
+- La lista completa de rechazos auditados se encuentra en la imagen `Bitacora_Rechazados.png`.
