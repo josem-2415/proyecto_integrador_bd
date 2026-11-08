@@ -14,17 +14,17 @@ correr() {  # correr <nombre-salida> <script> <csv>
   $PSQL -v archivo="$D/$3" -f "/scripts/$2" 2>&1 | tee "$OUT/$1.txt"
 }
 
-correr 01-libros-limpio            carga-libros.sql    libros_semilla.csv
-correr 02-libros-con-errores       carga-libros.sql    libros_semilla_con_errores.csv
-correr 03-lectores-limpio          carga-lectores.sql  lectores_semilla.csv
-correr 04-lectores-con-errores     carga-lectores.sql  lectores_semilla_con_errores.csv
-correr 05-libros-csv-propio        carga-libros.sql    libros_propio.csv
-correr 06-libros-limpio-repetido   carga-libros.sql    libros_semilla.csv   # no debe duplicar nada
+correr 01-libros-limpio            S14-carga-libros.sql    libros_semilla.csv
+correr 02-libros-con-errores       S14-carga-libros.sql    libros_semilla_con_errores.csv
+correr 03-lectores-limpio          S14-carga-lectores.sql  lectores_semilla.csv
+correr 04-lectores-con-errores     S14-carga-lectores.sql  lectores_semilla_con_errores.csv
+correr 05-libros-csv-propio        S14-carga-libros.sql    libros_propio.csv
+correr 06-libros-limpio-repetido   S14-carga-libros.sql    libros_semilla.csv   # no debe duplicar nada
 
 # Prueba de la última línea de defensa: se anula la regla 'título vacío' y se recarga.
 # Primero se borran los rechazos... no hace falta: la carga abortará y hará ROLLBACK completo.
 echo ">>> 07-sin-regla-titulo (se espera ERROR del CHECK y ROLLBACK)"
-sed "s/WHEN titulo = ''/WHEN false/" postgres/scripts/carga-libros.sql \
+sed "s/WHEN titulo = ''/WHEN false/" postgres/scripts/S14-carga-libros.sql \
   | $PSQL -v archivo="$D/libros_semilla_con_errores.csv" -f - 2>&1 | tee "$OUT/07-sin-regla-titulo.txt"
 
 echo; echo "Conteos finales:"

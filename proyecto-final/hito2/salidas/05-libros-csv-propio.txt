@@ -1,0 +1,23 @@
+SET
+BEGIN
+CREATE TABLE
+COPY 10
+SELECT 9
+UPDATE 9
+UPDATE 1
+INSERT 0 6
+INSERT 0 17
+INSERT 0 3
+ cargadas | rechazadas 
+----------+------------
+        6 |          3
+(1 row)
+
+ linea |                            motivo                             |                                     contenido                                      
+-------+---------------------------------------------------------------+------------------------------------------------------------------------------------
+     8 | isbn repetido en el archivo (primera aparición en la línea 2) | 9789990000001,Pedro Páramo (copia repetida en el archivo),Juan Rulfo,Novela,1955,1
+     9 | año fuera de rango                                            | 9789990000007,Libro del futuro,Autor de Prueba,Ciencia ficción,2099,2
+    10 | isbn no tiene 13 dígitos                                      | 97899900000AB,Relato con ISBN con letras,Autor de Prueba,Novela,2001,1
+(3 rows)
+
+COMMIT

@@ -1,0 +1,9 @@
+SET
+BEGIN
+CREATE TABLE
+COPY 9
+SELECT 8
+UPDATE 8
+UPDATE 0
+psql:<stdin>:86: ERROR:  new row for relation "libro" violates check constraint "libro_titulo_check"
+DETAIL:  Failing row contains (9780000000033, , Julio Cortázar, Novela, 1963, t).

@@ -1,0 +1,20 @@
+SET
+BEGIN
+CREATE TABLE
+COPY 33
+SELECT 32
+UPDATE 32
+UPDATE 0
+INSERT 0 32
+INSERT 0 94
+INSERT 0 0
+ cargadas | rechazadas 
+----------+------------
+       32 |          0
+(1 row)
+
+ linea | motivo | contenido 
+-------+--------+-----------
+(0 rows)
+
+COMMIT

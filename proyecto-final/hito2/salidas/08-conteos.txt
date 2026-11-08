@@ -1,0 +1,5 @@
+ libros | ejemplares | usuarios | rechazos 
+--------+------------+----------+----------
+     38 |        111 |       20 |       49
+(1 row)
+
