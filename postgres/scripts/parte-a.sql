@@ -1,4 +1,4 @@
--- CONSULTAS SQL 
+-- CONSULTAS SQL DE LA PARTE A
 
 -- 1) Para el pedido 1003: nombre del cliente, nombre de cada producto, cantidad y subtotal (cantidad * precio_unitario).
 
@@ -17,7 +17,7 @@ LEFT JOIN cliente re ON cl.referido_por = re.id_cliente;
 
 -- 3) Productos que nunca se han vendido (en ningún pedido, ni siquiera cancelado).
 
-SELECT p*,
+SELECT p*
 FROM producto p
 WHERE NOT  EXISTS (
     SELECT 1 
@@ -75,7 +75,7 @@ WHERE c.ciudad = 'Cali' AND EXISTS (
     INNER JOIN detalle d ON d.id_pedido = p.id_pedido
     INNER JOIN producto pr ON pr.id_producto = d.id_producto
     WHERE p.id_cliente = c.id_cliente
-    AND p.estado <> 'canceclado'
+    AND p.estado <> 'cancelado'
     AND pr.categoria = 'Accesorio'
 )
 ORDER BY c.id_cliente ASC;

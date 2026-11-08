@@ -35,8 +35,12 @@ WHERE u.id_rol = 1 AND pr.estado = 'en_mora'
 GROUP BY u.id, u.documento, u.nombres, u.apellidos;
 
 
--- Préstamos en mora, con el nombre del lector, su correo y su teléfono (la lista del botón "Enviar notificación").
-SELECT u.nombres, u.correo, u.telefono
+-- || Préstamos en mora, con el nombre del lector, su correo y su teléfono (la lista del botón "Enviar notificación"). || --
+SELECT 
+    STRING_AGG(pr.id::text, ', ') AS ids_prestamos,  -- la funcion string agg sirve para crear la lista de id de pretamos en mora q tiene el lector 
+    u.nombres, 
+    u.correo, 
+    u.telefono
 FROM prestamo pr
 INNER JOIN usuario u ON u.id = pr.id_lector
 WHERE pr.estado = 'en_mora'
