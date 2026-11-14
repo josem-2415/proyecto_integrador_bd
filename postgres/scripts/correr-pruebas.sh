@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Corre las cargas del laboratorio S14 y guarda cada salida en proyecto-final/hito2/salidas/
+# Corre las cargas del laboratorio S14 y los reportes de S16 y guarda cada salida en proyecto-final/hito2/salidas/
 # Uso (desde la raíz del repo, con la base recién creada y vacía):
 #   bash postgres/scripts/correr-pruebas.sh
 set -u
@@ -29,3 +29,9 @@ sed "s/WHEN titulo = ''/WHEN false/" postgres/scripts/S14-carga-libros.sql \
 
 echo; echo "Conteos finales:"
 $PSQL -c "SELECT (SELECT count(*) FROM biblioteca.libro) libros, (SELECT count(*) FROM biblioteca.ejemplar) ejemplares, (SELECT count(*) FROM biblioteca.usuario) usuarios, (SELECT count(*) FROM biblioteca.rechazo_carga) rechazos;" | tee "$OUT/08-conteos.txt"
+
+# ---- S16 Parte B: datos de prueba y los 4 reportes ----
+echo ">>> 09-datos-prueba"
+$PSQL -f /scripts/datos-prueba.sql 2>&1 | tee "$OUT/09-datos-prueba.txt"
+echo ">>> 10-reportes"
+$PSQL -f /scripts/reportes.sql 2>&1 | tee "$OUT/10-reportes.txt"
