@@ -43,9 +43,9 @@ CREATE TABLE inscripcion_clase (
 );
 
 CREATE TABLE pedazos AS
-SELECT DISTINCT s.id_socio, initcap(trim(c)) AS nombre_clase
-FROM socio s, string_to_table(s.clases, ';') AS c
-WHERE trim(c) <> '';
+SELECT DISTINCT s.id_socio, initcap(trim(c)) AS nombre_clase -- initcap par poner en mayuscala la pprimera letra 
+FROM socio s, string_to_table(s.clases, ';') AS c --string_to_table dividir el texto multivariable 
+WHERE trim(c) <> ''; -- trim para eliminar lso espacios en blanco 
 
 INSERT INTO plan SELECT DISTINCT plan, valor_plan FROM socio;
 INSERT INTO clase SELECT DISTINCT nombre_clase FROM pedazos;
@@ -106,11 +106,17 @@ CREATE TABLE formula_medicamento (
 );
 
 CREATE TABLE lineas AS
-SELECT num_formula, medicamento1 AS nombre_medicamento, dosis1 AS dosis FROM formula
+SELECT num_formula, medicamento1 AS nombre_medicamento, dosis1 AS dosis 
+FROM formula 
+WHERE medicamento1 IS NOT NULL AND dosis1 IS NOT NULL
 UNION ALL
-SELECT num_formula, medicamento2, dosis2 FROM formula WHERE medicamento2 IS NOT NULL
+SELECT num_formula, medicamento2, dosis2 
+FROM formula 
+WHERE medicamento2 IS NOT NULL AND dosis2 IS NOT NULL
 UNION ALL
-SELECT num_formula, medicamento3, dosis3 FROM formula WHERE medicamento3 IS NOT NULL;
+SELECT num_formula, medicamento3, dosis3 
+FROM formula 
+WHERE medicamento3 IS NOT NULL AND dosis3 IS NOT NULL;
 
 INSERT INTO paciente SELECT DISTINCT doc_paciente, nombre_paciente FROM formula;
 INSERT INTO medicamento SELECT DISTINCT nombre_medicamento FROM lineas;

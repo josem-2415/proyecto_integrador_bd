@@ -1,205 +1,273 @@
 -- =====================================================================
+-- S19. Taller: detectar y corregir esquemas mal diseñados
+-- Entregable del grupo: casos.sql  (Parte A: los cuatro casos)
+-- Integrantes: ______________________________________________
+-- =====================================================================
+
+
+-- =====================================================================
 -- CASO 1: GIMNASIO
--- Esquema original: socio (id_socio PK, nombre, plan, valor_plan, clases)
--- La queja: "Le pedí al sistema cuántos socios hay en Yoga para abrir otro
---   grupo y me dijo 2, pero yo sé que son 3. Y en Spinning me dijo 3, cuando
---   son 2."
 -- =====================================================================
 SET search_path TO gimnasio;
 
--- ======================================
 -- (a) DIAGNÓSTICO
--- ======================================
--- Dependencias funcionales (con la regla que las justifica):
---   id_socio -> nombre, plan, valor_plan   (id_socio es la PK)
---   plan     -> valor_plan                 (regla: cada plan tiene un valor fijo)
---
--- Problema principal (1FN): la columna 'clases' almacena una lista de valores
---   separados por punto y coma (;). Esto obliga a usar LIKE, generando falsos
---   positivos ('Spinning avanzado' cuenta como 'Spinning') y falsos negativos
---   por mayúsculas/minúsculas ('yoga' vs 'Yoga'). Es la causa de la queja.
---
--- Problema secundario (3FN): dependencia transitiva id_socio -> plan -> valor_plan.
---   El valor del plan depende del tipo de plan, no directamente del socio, lo que
---   genera redundancia (90000 se repite en cada socio Mensual) y anomalías de
---   actualización (subir el plan Mensual obliga a cambiar todas sus filas).
---
--- Otro síntoma de no estar en 1FN: como la lista es texto libre, la misma clase
---   aparece escrita de varias formas ('Yoga', ' Yoga ', 'yoga') y nada lo impide.
+-- Esquema: socio (id_socio PK, nombre, plan, valor_plan, clases)
+-- Problema: Violación de 1FN. Contiene atributos multivaluados (múltiples clases mezcladas en una sola celda, separadas por ';').
 
--- ======================================
 -- (b) EVIDENCIA
--- ======================================
+SELECT count(*) AS socios_yoga_segun_el_sistema
+FROM socio WHERE clases LIKE '%Yoga%';
 
--- 1. Ver todos los datos crudos para detectar suciedad (espacios, mayúsculas)
-SELECT * FROM socio;
--- Resultado: 6 socios. María Fernanda tiene 'Pilates;yoga' (minúscula),
---   Andrés tiene 'Yoga ' con espacio al final y Sofía no tiene clases (NULL).
+-- (c) ESQUEMA CORREGIDO
+--   plan (plan PK, valor_plan)
+--   socio (id_socio PK, nombre, plan FK -> plan)
+--   clase (nombre_clase PK)
+--   inscripcion_clase (id_socio FK, nombre_clase FK, PK (id_socio, nombre_clase))
 
--- 2. Demostrar el error de la queja con LIKE (subestima Yoga y sobreestima Spinning)
-SELECT count(*) AS yoga_con_like FROM socio WHERE clases LIKE '%Yoga%';
--- Resultado: 2. Deberían ser 3: falta María Fernanda, que escribió 'yoga'.
-
-SELECT count(*) AS yoga_case_insensitive FROM socio WHERE clases ILIKE '%Yoga%';
--- Resultado: 3. ILIKE (LIKE sin distinguir mayúsculas) corrige el caso de Yoga,
---   pero solo arregla las mayúsculas: no resuelve el problema (ver Spinning).
-
-SELECT count(*) AS spinning_con_like FROM socio WHERE clases LIKE '%Spinning%';
--- Resultado: 3. Deberían ser 2: cuenta a Pedro, que está en 'Spinning avanzado',
---   una clase distinta que contiene la palabra 'Spinning'.
-
-SELECT count(*) AS spinning_case_insensitive FROM socio WHERE clases ILIKE '%Spinning%';
--- Resultado: 3. Con ILIKE sigue saliendo mal: buscar dentro de un texto no
---   distingue una clase de otra cuyo nombre la contiene.
-
--- 3. Ver cómo está escrita realmente cada clase (los corchetes muestran los espacios)
-SELECT '[' || c || ']' AS pedazo, count(*)
-FROM socio s, string_to_table(s.clases, ';') AS c
-GROUP BY c
-ORDER BY 1;
--- Resultado: 9 pedazos, todos distintos como texto. 'Yoga' aparece de 3 formas
---   ('[Yoga]', '[ Yoga ]', '[yoga]'), 'Spinning' de 2 ('[Spinning]', '[ Spinning]')
---   y 'Funcional' de 2 ('[Funcional]', '[ Funcional]').
-
--- 4. Demostrar redundancia y verificar si hay contradicciones en plan -> valor_plan
-SELECT plan, valor_plan, count(*) AS cantidad_socios
-FROM socio
-GROUP BY plan, valor_plan;
--- Resultado: Anual 850000 (2 socios), Mensual 90000 (3), Trimestral 240000 (1).
---   El valor se repite en cada socio del plan: es redundancia.
-
--- Si esta consulta devuelve filas, hay que decidir qué valor_plan es el correcto:
-SELECT plan FROM socio GROUP BY plan HAVING count(DISTINCT valor_plan) > 1;
--- Resultado: 0 filas. Los datos no contradicen plan -> valor_plan, así que no
---   hay que decidir nada: cada plan pasa con el único valor que tiene.
-
--- =================================
--- (c) ESQUEMA CORREGIDO (3FN)
--- =================================
--- plan              (plan PK, valor_plan)
--- socio             (id_socio PK, nombre, plan FK -> plan)
--- clase             (id_clase PK, nombre UNIQUE)
--- inscripcion_clase (id_socio PK/FK -> socio, id_clase PK/FK -> clase)
-
--- ======================
 -- (d) MIGRACIÓN
--- ======================
--- Conteos esperados (calculados antes de migrar):
---   plan               3  (Mensual, Trimestral, Anual)
---   clase              5  (Yoga, Spinning, Spinning Avanzado, Pilates, Funcional)
---   inscripcion_clase  9  (Laura 2, Pedro 1, María Fernanda 2, Andrés 3,
---                          Sofía 0, Tomás 1), igual a los 9 pedazos de la evidencia 3
---
--- Decisión de limpieza: initcap(trim(...)) quita los espacios y unifica
---   'Yoga', ' Yoga ' y 'yoga'. Efecto a tener en cuenta: initcap pone en
---   mayúscula cada palabra, así que 'Spinning avanzado' queda 'Spinning Avanzado'.
---
--- Ejecutar por partes: primero hasta la verificación (e); si los números
---   coinciden, el DROP COLUMN y el COMMIT. Si algo no coincide, ROLLBACK.
-
 BEGIN;
 
--- 1. Crear tablas nuevas con todas las restricciones
 CREATE TABLE plan (
-    plan       VARCHAR(50) PRIMARY KEY,
-    valor_plan INTEGER     NOT NULL CHECK (valor_plan > 0)   -- mismo tipo que en socio
+    plan        varchar(20) PRIMARY KEY,
+    valor_plan  integer     NOT NULL
 );
 
 CREATE TABLE clase (
-    id_clase SERIAL PRIMARY KEY,
-    nombre   VARCHAR(100) NOT NULL UNIQUE
+    nombre_clase  varchar(40) PRIMARY KEY
 );
 
 CREATE TABLE inscripcion_clase (
-    id_socio INT NOT NULL REFERENCES socio(id_socio),
-    id_clase INT NOT NULL REFERENCES clase(id_clase),
-    PRIMARY KEY (id_socio, id_clase)
+    id_socio      integer     NOT NULL REFERENCES socio,
+    nombre_clase  varchar(40) NOT NULL REFERENCES clase,
+    PRIMARY KEY (id_socio, nombre_clase)
 );
 
--- 2. Copiar los datos
--- Planes: uno por plan, sin repetir. Si un plan tuviera dos valores, la PK
---   fallaría aquí y la transacción se detendría.
-INSERT INTO plan (plan, valor_plan)
-SELECT DISTINCT plan, valor_plan
-FROM socio;
+CREATE TABLE pedazos AS
+SELECT DISTINCT s.id_socio, initcap(trim(c)) AS nombre_clase -- initcap par poner en mayuscala la pprimera letra 
+FROM socio s, string_to_table(s.clases, ';') AS c --string_to_table dividir el texto multivariable 
+WHERE trim(c) <> ''; -- trim para eliminar lso espacios en blanco 
 
--- Clases: partir la lista en filas y limpiar cada pedazo. Sofía (NULL) no
---   produce filas.
-INSERT INTO clase (nombre)
-SELECT DISTINCT initcap(trim(c))
-FROM socio s, string_to_table(s.clases, ';') AS c;
+INSERT INTO plan SELECT DISTINCT plan, valor_plan FROM socio;
+INSERT INTO clase SELECT DISTINCT nombre_clase FROM pedazos;
+INSERT INTO inscripcion_clase SELECT id_socio, nombre_clase FROM pedazos;
 
--- Inscripciones: una fila por socio y clase, buscando la clase por su nombre limpio.
-INSERT INTO inscripcion_clase (id_socio, id_clase)
-SELECT s.id_socio, k.id_clase
-FROM socio s, string_to_table(s.clases, ';') AS c, clase k
-WHERE k.nombre = initcap(trim(c));
+ALTER TABLE socio ADD FOREIGN KEY (plan) REFERENCES plan;
 
--- socio.plan ahora debe existir en la tabla plan
-ALTER TABLE socio ADD FOREIGN KEY (plan) REFERENCES plan (plan);
+-- (e) VERIFICACIÓN (antes de quitar lo viejo)
+SELECT 'plan' AS tabla, 3 AS esperado, count(*) AS obtenido FROM plan
+UNION ALL SELECT 'clase', 5, count(*) FROM clase
+UNION ALL SELECT 'inscripcion_clase', 9, count(*) FROM inscripcion_clase
+UNION ALL SELECT 'socio', 6, count(*) FROM socio;
 
--- ======================
--- (e) VERIFICACIÓN (antes de quitar las columnas viejas)
--- ======================
-
--- Conteos esperados frente a obtenidos
-SELECT (SELECT count(*) FROM plan)              AS planes,
-       (SELECT count(*) FROM clase)             AS clases,
-       (SELECT count(*) FROM inscripcion_clase) AS inscripciones;
--- Esperado: 3, 5, 9. Obtenido: 3, 5, 9.
-
--- No se perdió ninguna inscripción: lo que había y no quedó en las tablas nuevas
-SELECT s.id_socio, initcap(trim(c))
-FROM socio s, string_to_table(s.clases, ';') AS c
-EXCEPT
-SELECT i.id_socio, k.nombre
-FROM inscripcion_clase i JOIN clase k ON k.id_clase = i.id_clase;
--- Esperado: 0 filas. Obtenido: 0 filas.
-
--- No se inventó ninguna: lo que quedó en las tablas nuevas y no estaba antes
-SELECT i.id_socio, k.nombre
-FROM inscripcion_clase i JOIN clase k ON k.id_clase = i.id_clase
-EXCEPT
-SELECT s.id_socio, initcap(trim(c))
-FROM socio s, string_to_table(s.clases, ';') AS c;
--- Esperado: 0 filas. Obtenido: 0 filas.
-
--- Cada socio conserva el valor de su plan
-SELECT id_socio, plan, valor_plan FROM socio
-EXCEPT
-SELECT s.id_socio, p.plan, p.valor_plan
-FROM socio s JOIN plan p ON p.plan = s.plan;
--- Esperado: 0 filas. Obtenido: 0 filas.
-
--- 3. Quitar lo viejo, solo después de verificar
 ALTER TABLE socio DROP COLUMN valor_plan, DROP COLUMN clases;
-
+DROP TABLE pedazos;
 COMMIT;
 
--- La queja, resuelta en el esquema nuevo
-SELECT k.nombre, count(*) AS socios
-FROM inscripcion_clase i JOIN clase k ON k.id_clase = i.id_clase
-GROUP BY k.nombre
-ORDER BY k.nombre;
--- Resultado: Funcional 2, Pilates 1, Spinning 2, Spinning Avanzado 1, Yoga 3.
---   Yoga da 3 y Spinning da 2, como decía el gimnasio.
+-- PREGUNTA PROPIA: ¿En cuál tabla va el horario de clase, y por qué era imposible hacerlo bien con el diseño original?
+-- RESPUESTA: El horario debe ir en la nueva tabla `clase`. En el diseño original era imposible registrarlo porque las clases no eran entidades separadas (solo eran texto).
 
--- ======================
--- PREGUNTA PROPIA
--- ======================
--- Después de migrar, el gimnasio quiere guardar el horario de cada clase
--- (día y hora). ¿En cuál tabla va, y por qué habría sido imposible hacerlo
--- bien con el diseño original?
---
--- Va en la tabla clase, porque el horario depende de la clase y no del socio:
---   id_clase -> dia, hora. Se guarda una sola vez por clase. Si una clase
---   tuviera varios horarios (por ejemplo, lunes y miércoles), iría en una
---   tabla aparte, horario (id_clase FK, dia, hora), con PK (id_clase, dia, hora).
---
--- Con el diseño original era imposible hacerlo bien porque la clase no existía
---   como entidad: solo era un pedazo de texto dentro de 'clases'. No había una
---   fila donde poner su horario. Una columna 'horario' en socio no sirve,
---   porque un socio tiene varias clases; habría que meter el horario dentro
---   del mismo texto, repetido en cada socio inscrito, y bastaría con que dos
---   socios lo escribieran distinto para tener horarios contradictorios de la
---   misma clase.
+
+-- =====================================================================
+-- CASO 2: FARMACIA
+-- =====================================================================
+SET search_path TO farmacia;
+
+-- (a) DIAGNÓSTICO
+-- Esquema: formula (num_formula PK, fecha, doc_paciente, nombre_paciente, medicamento1, dosis1, medicamento2, dosis2, medicamento3, dosis3)
+-- Problema: Violación de 1FN. Uso de columnas numeradas para repetir grupos de datos.
+
+-- (b) EVIDENCIA
+SELECT num_formula, medicamento1, medicamento2, medicamento3
+FROM formula WHERE medicamento3 IS NOT NULL;
+
+-- (c) ESQUEMA CORREGIDO
+--   paciente (doc_paciente PK, nombre_paciente)
+--   medicamento (nombre_medicamento PK)
+--   formula (num_formula PK, fecha, doc_paciente FK -> paciente)
+--   formula_medicamento (num_formula FK, nombre_medicamento FK, dosis, PK (num_formula, nombre_medicamento))
+
+-- (d) MIGRACIÓN
+BEGIN;
+
+CREATE TABLE paciente (
+    doc_paciente     varchar(15) PRIMARY KEY,
+    nombre_paciente  varchar(80) NOT NULL
+);
+
+CREATE TABLE medicamento (
+    nombre_medicamento  varchar(60) PRIMARY KEY
+);
+
+CREATE TABLE formula_medicamento (
+    num_formula         integer     NOT NULL REFERENCES formula,
+    nombre_medicamento  varchar(60) NOT NULL REFERENCES medicamento,
+    dosis               varchar(40) NOT NULL,
+    PRIMARY KEY (num_formula, nombre_medicamento)
+);
+
+CREATE TABLE lineas AS
+SELECT num_formula, medicamento1 AS nombre_medicamento, dosis1 AS dosis 
+FROM formula 
+WHERE medicamento1 IS NOT NULL AND dosis1 IS NOT NULL
+UNION ALL
+SELECT num_formula, medicamento2, dosis2 
+FROM formula 
+WHERE medicamento2 IS NOT NULL AND dosis2 IS NOT NULL
+UNION ALL
+SELECT num_formula, medicamento3, dosis3 
+FROM formula 
+WHERE medicamento3 IS NOT NULL AND dosis3 IS NOT NULL;
+
+INSERT INTO paciente SELECT DISTINCT doc_paciente, nombre_paciente FROM formula;
+INSERT INTO medicamento SELECT DISTINCT nombre_medicamento FROM lineas;
+INSERT INTO formula_medicamento SELECT num_formula, nombre_medicamento, dosis FROM lineas;
+
+ALTER TABLE formula ADD FOREIGN KEY (doc_paciente) REFERENCES paciente;
+
+-- (e) VERIFICACIÓN
+SELECT 'paciente' AS tabla, 3 AS esperado, count(*) AS obtenido FROM paciente
+UNION ALL SELECT 'medicamento', 5, count(*) FROM medicamento
+UNION ALL SELECT 'formula', 4, count(*) FROM formula
+UNION ALL SELECT 'formula_medicamento', 8, count(*) FROM formula_medicamento;
+
+ALTER TABLE formula
+    DROP COLUMN nombre_paciente,
+    DROP COLUMN medicamento1, DROP COLUMN dosis1,
+    DROP COLUMN medicamento2, DROP COLUMN dosis2,
+    DROP COLUMN medicamento3, DROP COLUMN dosis3;
+DROP TABLE lineas;
+COMMIT;
+
+-- PREGUNTA PROPIA: ¿Por qué no basta con agregar medicamento4 y dosis4?
+-- RESPUESTA: Es ineficiente; el sistema vuelve a fallar si recetan 5 medicamentos, y obliga a usar múltiples OR para buscar una sola medicina.
+
+
+-- =====================================================================
+-- CASO 3: CURSOS LIBRES
+-- =====================================================================
+SET search_path TO cursos_libres;
+
+-- (a) DIAGNÓSTICO
+-- Esquema: inscripcion (id PK serial, doc_participante, nombre_participante, correo, cod_curso, nombre_curso, cod_sede, direccion_sede, valor_pagado)
+-- Problema: Integridad de datos desprotegida. La clave primaria artificial (id) permite que la misma persona se inscriba dos veces en el mismo curso.
+
+-- (b) EVIDENCIA
+SELECT doc_participante, cod_curso, count(*) AS veces
+FROM inscripcion GROUP BY doc_participante, cod_curso HAVING count(*) > 1;
+
+-- (c) ESQUEMA CORREGIDO
+--   sede (cod_sede PK, direccion_sede)
+--   curso (cod_curso PK, nombre_curso, cod_sede FK -> sede)
+--   participante (doc_participante PK, nombre_participante, correo UNIQUE)
+--   inscripcion (doc_participante FK, cod_curso FK, valor_pagado, PK (doc_participante, cod_curso))
+
+-- (d) MIGRACIÓN
+BEGIN;
+
+ALTER TABLE inscripcion RENAME TO inscripcion_vieja;
+
+CREATE TABLE sede (
+    cod_sede        char(2)     PRIMARY KEY,
+    direccion_sede  varchar(60) NOT NULL
+);
+
+CREATE TABLE curso (
+    cod_curso     char(3)     PRIMARY KEY,
+    nombre_curso  varchar(60) NOT NULL,
+    cod_sede      char(2)     NOT NULL REFERENCES sede
+);
+
+CREATE TABLE participante (
+    doc_participante     varchar(15)  PRIMARY KEY,
+    nombre_participante  varchar(80)  NOT NULL,
+    correo               varchar(120) NOT NULL UNIQUE
+);
+
+CREATE TABLE inscripcion (
+    doc_participante  varchar(15) NOT NULL REFERENCES participante,
+    cod_curso         char(3)     NOT NULL REFERENCES curso,
+    valor_pagado      integer     NOT NULL,
+    PRIMARY KEY (doc_participante, cod_curso)
+);
+
+INSERT INTO sede         SELECT DISTINCT cod_sede, direccion_sede FROM inscripcion_vieja;
+INSERT INTO curso        SELECT DISTINCT cod_curso, nombre_curso, cod_sede FROM inscripcion_vieja;
+INSERT INTO participante SELECT DISTINCT doc_participante, nombre_participante, correo FROM inscripcion_vieja;
+INSERT INTO inscripcion  SELECT DISTINCT doc_participante, cod_curso, valor_pagado FROM inscripcion_vieja;
+
+-- (e) VERIFICACIÓN
+SELECT 'sede' AS tabla, 2 AS esperado, count(*) AS obtenido FROM sede
+UNION ALL SELECT 'curso', 3, count(*) FROM curso
+UNION ALL SELECT 'participante', 4, count(*) FROM participante
+UNION ALL SELECT 'inscripcion', 7, count(*) FROM inscripcion;
+
+DROP TABLE inscripcion_vieja;
+COMMIT;
+
+-- PREGUNTA PROPIA: ¿Por qué una PK de una sola columna no la pone en 2FN y qué habría evitado?
+-- RESPUESTA: Un id autonumérico no soluciona el problema lógico. Faltó ponerle UNIQUE al documento y al curso para evitar cobrar e inscribir doble por error.
+
+
+-- =====================================================================
+-- CASO 4: ENVÍOS
+-- =====================================================================
+SET search_path TO envios;
+
+-- (a) DIAGNÓSTICO
+-- Esquema: envio (num_guia PK, fecha, ciudad_destino, departamento, zona, tarifa_kg, peso_kg, valor)
+-- Problema: Violación de 3FN. La tabla guarda el valor total, que es calculable (peso_kg * tarifa_kg).
+
+-- (b) EVIDENCIA
+SELECT num_guia, ciudad_destino, peso_kg, tarifa_kg,
+       valor AS valor_cobrado, peso_kg * tarifa_kg AS valor_correcto
+FROM envio WHERE valor <> peso_kg * tarifa_kg;
+
+-- (c) ESQUEMA CORREGIDO
+--   zona (zona PK, tarifa_kg)
+--   ciudad (ciudad PK, departamento, zona FK -> zona)
+--   envio (num_guia PK, fecha, ciudad_destino FK -> ciudad, peso_kg)
+--   vista envio_con_valor (valor se calcula, no se guarda)
+
+-- (d) MIGRACIÓN
+BEGIN;
+
+CREATE TABLE envio_antes AS SELECT * FROM envio;
+
+CREATE TABLE zona (
+    zona       smallint PRIMARY KEY,
+    tarifa_kg  integer  NOT NULL
+);
+
+CREATE TABLE ciudad (
+    ciudad        varchar(40) PRIMARY KEY,
+    departamento  varchar(40) NOT NULL,
+    zona          smallint    NOT NULL REFERENCES zona
+);
+
+INSERT INTO zona   SELECT DISTINCT zona, tarifa_kg FROM envio;
+INSERT INTO ciudad SELECT DISTINCT ciudad_destino, departamento, zona FROM envio;
+
+ALTER TABLE envio ADD FOREIGN KEY (ciudad_destino) REFERENCES ciudad;
+ALTER TABLE envio
+    DROP COLUMN departamento,
+    DROP COLUMN zona,
+    DROP COLUMN tarifa_kg,
+    DROP COLUMN valor;
+
+CREATE VIEW envio_con_valor AS
+SELECT num_guia, fecha, ciudad_destino, departamento, zona, tarifa_kg, peso_kg,
+       peso_kg * tarifa_kg AS valor
+FROM envio
+JOIN ciudad ON ciudad.ciudad = envio.ciudad_destino
+JOIN zona   USING (zona);
+
+-- (e) VERIFICACIÓN
+SELECT 'zona' AS tabla, 3 AS esperado, count(*) AS obtenido FROM zona
+UNION ALL SELECT 'ciudad', 5, count(*) FROM ciudad
+UNION ALL SELECT 'envio', 8, count(*) FROM envio;
+
+DROP TABLE envio_antes;
+COMMIT;
+
+-- PREGUNTA PROPIA: ¿Qué cambiarían para que un aumento de tarifas no modifique envíos pasados?
+-- RESPUESTA: Se debe guardar la tarifa histórica (tarifa_cobrada) en el envío. No es redundancia, es preservar el historial contable.
