@@ -1,101 +1,107 @@
--- Ejecutar primero: SET search_path TO automotriz;
+--Crear el Script de normalizar para el esquema de la Base de Datos de la biblioteca
 
--- (a) PASO 1: buscar filas que contradicen cada dependencia
--- (si devuelve filas, hay un dato inconsistente)
-SELECT num_orden FROM servicio_plano GROUP BY num_orden
- HAVING COUNT(DISTINCT (fecha_ingreso, kilometraje, placa)) > 1;
-SELECT placa FROM servicio_plano GROUP BY placa
- HAVING COUNT(DISTINCT (modelo, cedula_dueno)) > 1;
-SELECT modelo FROM servicio_plano GROUP BY modelo
- HAVING COUNT(DISTINCT marca) > 1;
-SELECT cedula_dueno FROM servicio_plano GROUP BY cedula_dueno
- HAVING COUNT(DISTINCT (nombre_dueno, telefono_dueno)) > 1;
-SELECT cod_servicio FROM servicio_plano GROUP BY cod_servicio
- HAVING COUNT(DISTINCT (nombre_servicio, precio_lista)) > 1;
-SELECT cod_mecanico FROM servicio_plano GROUP BY cod_mecanico
- HAVING COUNT(DISTINCT nombre_mecanico) > 1;
+--Intregrantes : Andres Felipe Rengifo Rodriguez
 
--- Hallazgo: la cédula 16700002 (Jorge Mejía) aparece con dos teléfonos:
--- 3104445566 en 4 filas (órdenes 5002 y 5003) y 3104445567 en 1 fila (orden 5006).
--- Se toma 3104445566 como correcto: es el que más se repite y el de la orden 5006
--- solo cambia el último dígito (error de digitación).
-UPDATE servicio_plano SET telefono_dueno = '3104445566'
- WHERE cedula_dueno = '16700002' AND telefono_dueno = '3104445567';
 
--- Volver a correr la consulta de cedula_dueno: debe dar 0 filas.
+-- La tabla ROl no resevira Ningunn cambio por q es unn catalogo Estatico 
 
--- (b) PASO 2: crear tablas 3FN
-CREATE TABLE dueno (
-  cedula VARCHAR(15) PRIMARY KEY,
-  nombre VARCHAR(80) NOT NULL,
-  telefono VARCHAR(15) NOT NULL);
-CREATE TABLE modelo (
-  modelo VARCHAR(30) PRIMARY KEY,
-  marca VARCHAR(30) NOT NULL);
-CREATE TABLE mecanico (
-  cod_mecanico CHAR(3) PRIMARY KEY,
-  nombre_mecanico VARCHAR(80) NOT NULL);
-CREATE TABLE servicio (
-  cod_servicio CHAR(3) PRIMARY KEY,
-  nombre_servicio VARCHAR(60) NOT NULL,
-  precio_lista INTEGER NOT NULL);
-CREATE TABLE vehiculo (
-  placa CHAR(6) PRIMARY KEY,
-  modelo VARCHAR(30) NOT NULL REFERENCES modelo,
-  cedula_dueno VARCHAR(15) NOT NULL REFERENCES dueno);
-CREATE TABLE orden (
-  num_orden INTEGER PRIMARY KEY,
-  fecha_ingreso DATE NOT NULL,
-  kilometraje INTEGER NOT NULL,
-  placa CHAR(6) NOT NULL REFERENCES vehiculo);
-CREATE TABLE orden_servicio (
-  num_orden INTEGER REFERENCES orden,
-  cod_servicio CHAR(3) REFERENCES servicio,
-  precio_cobrado INTEGER NOT NULL,
-  cod_mecanico CHAR(3) NOT NULL REFERENCES mecanico,
-  PRIMARY KEY (num_orden, cod_servicio));
 
--- (c) PASO 3: llenar en orden que respete las FK
-INSERT INTO dueno SELECT DISTINCT cedula_dueno, nombre_dueno, telefono_dueno FROM servicio_plano;
-INSERT INTO modelo SELECT DISTINCT modelo, marca FROM servicio_plano;
-INSERT INTO mecanico SELECT DISTINCT cod_mecanico, nombre_mecanico FROM servicio_plano;
-INSERT INTO servicio SELECT DISTINCT cod_servicio, nombre_servicio, precio_lista FROM servicio_plano;
-INSERT INTO vehiculo SELECT DISTINCT placa, modelo, cedula_dueno FROM servicio_plano;
-INSERT INTO orden SELECT DISTINCT num_orden, fecha_ingreso, kilometraje, placa FROM servicio_plano;
-INSERT INTO orden_servicio SELECT DISTINCT num_orden, cod_servicio, precio_cobrado, cod_mecanico FROM servicio_plano;
+--La Tabla de usuario dederia de eliminar el comando id ya q con documento es mas q suficiente como PK ya q el docuemnto simpre va a ser diferente paa todas las personas
+    --DECICION : Se conserva id como PK sustituta porque permite corregir documento o correo con un solo UPDATE sobre una fila, sin propagar el cambio a prestamo y devolucion. Ambos siguen protegidos con UNIQUE como claves candidatas.
 
-SELECT 'dueno' tabla, COUNT(*) FROM dueno UNION ALL
-SELECT 'modelo', COUNT(*) FROM modelo UNION ALL
-SELECT 'mecanico', COUNT(*) FROM mecanico UNION ALL
-SELECT 'servicio', COUNT(*) FROM servicio UNION ALL
-SELECT 'vehiculo', COUNT(*) FROM vehiculo UNION ALL
-SELECT 'orden', COUNT(*) FROM orden UNION ALL
-SELECT 'orden_servicio', COUNT(*) FROM orden_servicio;
+--Libro se deberia de craer una normalizacion en la parte de lectores por si un libro tiene mas de un lector , tendria q revisarse si las categorias van a ser una tabla estatica o uunn string 
+    -- Decicion : Ya q el proyecto solo nos pide un autor por libro no vemos necesario ponerr una tabla de autores
 
--- (d) PASO 4: reconstruir y comparar con EXCEPT en los dos sentidos
-CREATE VIEW reconstruida AS
-SELECT o.num_orden, o.fecha_ingreso, o.kilometraje, o.placa, v.modelo, m.marca,
-       v.cedula_dueno, d.nombre, d.telefono,
-       os.cod_servicio, s.nombre_servicio, s.precio_lista, os.precio_cobrado,
-       os.cod_mecanico, me.nombre_mecanico
-FROM orden o
-JOIN vehiculo v ON v.placa = o.placa
-JOIN modelo m ON m.modelo = v.modelo
-JOIN dueno d ON d.cedula = v.cedula_dueno
-JOIN orden_servicio os ON os.num_orden = o.num_orden
-JOIN servicio s ON s.cod_servicio = os.cod_servicio
-JOIN mecanico me ON me.cod_mecanico = os.cod_mecanico;
+--Ejemplar: error en el estado 
+    --DECICION : modificar estado como un bolena donde 
+        --true sifnifique q el ejemplar del libro este disppponivle para prestar o este siendo pretado 
+        --false para identificar q un ejemplar de un libro no es displible paara ser ppretado por alguna razon 
+        --(El saber si un ejemplar fue pretsaao lo define la tabla prestamo y no la tabla de ejemplarr solo dice si esta activo o no von el voleam)
 
-SELECT * FROM servicio_plano EXCEPT SELECT * FROM reconstruida;  -- debe dar 0 filas
-SELECT * FROM reconstruida EXCEPT SELECT * FROM servicio_plano;  -- debe dar 0 filas
+SET search_path TO biblioteca, public;
+BEGIN; -- Iniciar 
 
--- (e) PASO 5: anomalías (hacer DESPUÉS de (d))
--- Actualización: un solo UPDATE cambia el teléfono
-UPDATE dueno SET telefono = '3000000000' WHERE cedula = '16700002';  -- Jorge tiene 3 órdenes: basta 1 cambio
--- Inserción: mecánico nuevo sin servicios
-INSERT INTO mecanico VALUES ('M09', 'Mecánico Nuevo');
--- Borrado: quitar la orden 5005 sin perder vehículo ni servicio
-DELETE FROM orden_servicio WHERE num_orden = 5005;
-DELETE FROM orden WHERE num_orden = 5005;
-SELECT * FROM vehiculo WHERE placa = 'JKL012';  -- el vehículo sigue
-SELECT * FROM servicio;                          -- el catálogo sigue completo
+ALTER TABLE ejemplar ADD COLUMN activo BOOLEAN NOT NULL DEFAULT true; -- Cra una nuueva columna pppara ejemppplar donde esta contiennne boleanos la ccual no puede estar vacia y la ianicializa con true 
+UPDATE ejemplar SET activo = false WHERE estado = 'baja'; --Actualiza la columa de activo cuanod encunettre un estado como baja
+
+--Creamos una vista parra saber el estado de el jemppplar mediante una consulta 
+CREATE VIEW ejemplar_estado AS
+SELECT e.isbn, e.numero_ejemplar, e.activo,
+    CASE --funciona como un dependiendo del caso
+        WHEN NOT e.activo THEN 'baja' -- si el ejemplar no esta activo colocar baja 
+        WHEN EXISTS (                  -- Si esxiste un ejemplar q este en la tabla de prestamo y no este devuelto colocar prestaddo
+           SELECT 1 FROM prestamo p
+           WHERE p.isbn = e.isbn AND p.numero_ejemplar = e.numero_ejemplar
+             AND NOT EXISTS (SELECT 1 FROM devolucion d WHERE d.id_prestamo = p.id)
+         ) THEN 'prestado'
+         ELSE 'disponible' -- De lo contrario colocra disponible 
+       END AS estado -- En la columna de esttado de esta wiew
+FROM ejemplar e; 
+
+
+--Bloque de verificacion 
+DO $$ -- para poder ejecutarr un bloque con if 
+BEGIN
+IF EXISTS ( 
+    SELECT 1
+    FROM ejemplar e
+    JOIN ejemplar_estado v USING (isbn, numero_ejemplar) -- USING ES LO MISMO Q ASER ON manera mas linpia de porgramar 
+    WHERE e.estado::text <> v.estado -- si encuentra una diferenci entre el estdao viejo y el estado nuevo
+) THEN -- Lanza el siguiente error 
+    RAISE EXCEPTION 'El estado guardado no coincide con el calculado. Revisar antes de migrar.';
+END IF;--Si no finaliza
+END $$;
+
+--Bloque para eliminar lo viejo 
+ALTER TABLE ejemplar DROP COLUMN estado; -- ELiminamos la columna q no sirve 
+DROP TYPE estado_ejemplar; -- Eliminamos el tipo ENUM
+
+--Prestamo: Error con el estado este es mejor calcularmo mediante uan vista 
+-- 1. Vista que calcula el estado de cada préstamo
+CREATE VIEW prestamo_estado AS
+SELECT p.id, p.id_lector, p.isbn, p.numero_ejemplar, p.id_bibliotecario,
+       p.fecha_prestamo, p.fecha_esperada_devolucion,
+       d.fecha_devolucion,
+       CASE
+         WHEN d.id_prestamo IS NOT NULL THEN 'devuelto' --Cuando el id este en la tabla de devolucion colocar devuelvoto
+         WHEN p.fecha_esperada_devolucion < CURRENT_DATE THEN 'en_mora' -- (CURRENT_DATE deevuelve la fecha actual de la operacion ) -> si la fecha esperadda de deevolucion de es menor q hoy colocar el estado en mora 
+         ELSE 'activo' -- De lo contrario colocar en activo
+       END AS estado 
+FROM prestamo p
+LEFT JOIN devolucion d ON d.id_prestamo = p.id;
+
+
+-- 2. Evidencia de problemas si ay problemas asta el dia de hoy : préstamos cuyo estado guardado no coincide con el calculado
+SELECT p.id, p.estado AS guardado, v.estado AS calculado
+FROM prestamo p
+JOIN prestamo_estado v ON v.id = p.id
+WHERE p.estado::text <> v.estado;
+
+-- 3. Quitar lo viejo
+ALTER TABLE prestamo DROP COLUMN estado;
+DROP TYPE estado_prestamo;
+
+
+--Devoluvion problema con el id redundante 
+
+-- 1. Guardar el conteo para verificar después
+CREATE TEMP TABLE devolucion_antes AS
+SELECT id_prestamo, id_bibliotecario, fecha_devolucion FROM devolucion;
+
+-- 2. Cambiar la clave primaria
+ALTER TABLE devolucion DROP CONSTRAINT devolucion_id_prestamo_key;  -- el UNIQUE ya no hace falta
+ALTER TABLE devolucion DROP COLUMN id;                              -- también elimina la PK vieja
+ALTER TABLE devolucion ADD PRIMARY KEY (id_prestamo);
+
+-- 2. Verificar: no se perdió ni se inventó ninguna fila (ambas deben dar 0 filas)
+SELECT * FROM devolucion_antes
+EXCEPT
+SELECT id_prestamo, id_bibliotecario, fecha_devolucion FROM devolucion;
+
+SELECT id_prestamo, id_bibliotecario, fecha_devolucion FROM devolucion
+EXCEPT
+SELECT * FROM devolucion_antes;
+
+COMMIT;
+
+--Eliminar la tabla de rechazo de carga ya q no es principal 
